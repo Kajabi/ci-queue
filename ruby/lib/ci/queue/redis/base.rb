@@ -226,7 +226,15 @@ module CI
         end
 
         def eval_script(script, keys:, argv:, pipeline: redis)
-          pipeline.evalsha(load_script(script), keys: keys, argv: argv)
+          result = pipeline.evalsha(load_script(script), keys: keys, argv: argv)
+
+          # Fix Redis 5.3.0+ serialization: empty arrays should be nil
+          # Old Redis: empty results returned as `nil`
+          # Redis 5.3.0+: empty results returned as `[]` (empty array)
+          # This breaks logic like: (try_to_reserve_lost_test || try_to_reserve_test)
+          result = nil if result.is_a?(Array) && result.empty?
+
+          result
         end
 
         def load_script(script)

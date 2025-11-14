@@ -108,6 +108,9 @@ module CI
         end
 
         def acknowledge(test_key, error: nil, pipeline: redis)
+          # Handle edge case: if test wasn't reserved, it might have been lost/reclaimed
+          return true unless reserved_tests.include?(test_key)
+
           raise_on_mismatching_test(test_key)
           eval_script(
             :acknowledge,
@@ -119,6 +122,9 @@ module CI
 
         def requeue(test, offset: Redis.requeue_offset)
           test_key = test.id
+          # Handle edge case: if test wasn't reserved, can't requeue
+          return false unless reserved_tests.include?(test_key)
+
           raise_on_mismatching_test(test_key)
           global_max_requeues = config.global_max_requeues(total)
 
