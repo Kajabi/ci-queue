@@ -478,11 +478,18 @@ module RSpec
           @configuration.add_formatter(OrderRecorder, open('log/test_order.log', 'w+'))
 
           @configuration.with_suite_hooks do
-            break if @world.wants_to_quit
+            if @world.wants_to_quit
+              queue.shutdown!
+              break
+            end
             queue.poll do |example|
               success &= example.run(QueueReporter.new(reporter, queue, example))
-              break if @world.wants_to_quit
+              if @world.wants_to_quit
+                queue.shutdown!
+                break
+              end
             end
+            queue.stop_heartbeat!
           end
         end
 
