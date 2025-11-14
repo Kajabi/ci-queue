@@ -479,12 +479,14 @@ module RSpec
 
           @configuration.with_suite_hooks do
             if @world.wants_to_quit
+              puts "Shutting down queue due to RSpec wants to quit"
               queue.shutdown!
               break
             end
             queue.poll do |example|
               success &= example.run(QueueReporter.new(reporter, queue, example))
               if @world.wants_to_quit
+                puts "Shutting down queue due to RSpec wants to quit"
                 queue.shutdown!
                 break
               end
