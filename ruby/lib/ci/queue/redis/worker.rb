@@ -109,9 +109,12 @@ module CI
 
         def acknowledge(test_key, error: nil, pipeline: redis)
           # Handle edge case: if test wasn't reserved, it might have been lost/reclaimed
-          return true unless reserved_tests.include?(test_key)
+          # Don't early return - we still need to run the Lua script to clean up Redis state
+          # (remove from running set, add to processed set)
+          if reserved_tests.include?(test_key)
+            raise_on_mismatching_test(test_key)
+          end
 
-          raise_on_mismatching_test(test_key)
           eval_script(
             :acknowledge,
             keys: [key('running'), key('processed'), key('owners'), key('error-reports')],
@@ -122,10 +125,12 @@ module CI
 
         def requeue(test, offset: Redis.requeue_offset)
           test_key = test.id
-          # Handle edge case: if test wasn't reserved, can't requeue
-          return false unless reserved_tests.include?(test_key)
+          # Handle edge case: if test wasn't reserved, it might have been lost/reclaimed
+          # Don't early return - attempt requeue anyway, the Lua script will handle it correctly
+          if reserved_tests.include?(test_key)
+            raise_on_mismatching_test(test_key)
+          end
 
-          raise_on_mismatching_test(test_key)
           global_max_requeues = config.global_max_requeues(total)
 
           requeued = config.max_requeues > 0 && global_max_requeues > 0 && eval_script(
