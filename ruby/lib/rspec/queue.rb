@@ -219,6 +219,8 @@ module RSpec
 
       def finish(reporter, acknowledge: true)
         STDERR.puts "[CI-QUEUE DEBUG] finish: START for '#{id}' acknowledge=#{acknowledge} reporter.respond_to?(:requeue)=#{reporter.respond_to?(:requeue)}"
+        STDERR.puts "[CI-QUEUE DEBUG] finish: Caller stack (first 10 lines):"
+        caller[0..9].each { |line| STDERR.puts "[CI-QUEUE DEBUG]   #{line}" }
         STDERR.flush
 
         if acknowledge && reporter.respond_to?(:requeue)
