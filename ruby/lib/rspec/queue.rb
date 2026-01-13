@@ -213,27 +213,46 @@ module RSpec
       end
 
       def finish(reporter, acknowledge: true)
+        STDERR.puts "[CI-QUEUE DEBUG] finish: START for '#{id}' acknowledge=#{acknowledge} reporter.respond_to?(:requeue)=#{reporter.respond_to?(:requeue)}"
+        STDERR.flush
+
         if acknowledge && reporter.respond_to?(:requeue)
           if @exception
             reporter.report_failure!
-            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' has exception: #{@exception.class} - #{@exception.message.to_s[0..100]}"
+            requeueable = CI::Queue.requeueable?(@exception)
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' EXCEPTION: #{@exception.class} requeueable=#{requeueable}"
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Exception message: #{@exception.message.to_s[0..200]}"
+            STDERR.flush
           else
             reporter.report_success!
           end
 
-          if @exception && CI::Queue.requeueable?(@exception) && reporter.requeue
-            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUED - returning true"
-            reporter.cancel_run!
-            dup.mark_as_requeued!(reporter)
-            return true
-          elsif reporter.acknowledge || !@exception
+          if @exception && CI::Queue.requeueable?(@exception)
+            requeue_result = reporter.requeue
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' requeue returned: #{requeue_result.inspect}"
+            STDERR.flush
+            if requeue_result
+              STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUED SUCCESSFULLY - returning true"
+              STDERR.flush
+              reporter.cancel_run!
+              dup.mark_as_requeued!(reporter)
+              return true
+            else
+              STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUE FAILED (limit exceeded?) - will acknowledge as failure"
+              STDERR.flush
+            end
+          end
+
+          if reporter.acknowledge || !@exception
             # If the test was already acknowledged by another worker (we timed out)
             # Then we only record it if it is successful.
             result = super(reporter)
-            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' acknowledged - super returned: #{result.inspect}"
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' acknowledged, super returned: #{result.inspect}"
+            STDERR.flush
             result
           else
-            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' NOT acknowledged (timed out?) - canceling run"
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' NOT acknowledged (timed out?) - canceling run, returning nil"
+            STDERR.flush
             reporter.cancel_run!
             return
           end
@@ -408,10 +427,10 @@ module RSpec
             break if @world.wants_to_quit
             queue.poll do |example|
               result = example.run(QueueReporter.new(reporter, queue, example))
-              STDERR.puts "[CI-QUEUE DEBUG] Example '#{example.id}' run returned: #{result.inspect}"
               unless result
                 failed_examples << example.id
-                STDERR.puts "[CI-QUEUE DEBUG] Example '#{example.id}' FAILED - success is now false"
+                STDERR.puts "[CI-QUEUE DEBUG] run_specs: Example '#{example.id}' run() returned #{result.inspect} - marking as failure"
+                STDERR.flush
               end
               success &= result
               break if @world.wants_to_quit
