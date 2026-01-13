@@ -218,9 +218,7 @@ module RSpec
       end
 
       def finish(reporter, acknowledge: true)
-        STDERR.puts "[CI-QUEUE DEBUG] finish: START for '#{id}' acknowledge=#{acknowledge} reporter.respond_to?(:requeue)=#{reporter.respond_to?(:requeue)}"
-        STDERR.puts "[CI-QUEUE DEBUG] finish: Caller stack (first 10 lines):"
-        caller[0..9].each { |line| STDERR.puts "[CI-QUEUE DEBUG]   #{line}" }
+        STDERR.puts "[CI-QUEUE DEBUG] finish: START for '#{id}' acknowledge=#{acknowledge} @ci_queue_requeued=#{@ci_queue_requeued.inspect}"
         STDERR.flush
 
         if acknowledge && reporter.respond_to?(:requeue)
@@ -228,7 +226,6 @@ module RSpec
             reporter.report_failure!
             requeueable = CI::Queue.requeueable?(@exception)
             STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' EXCEPTION: #{@exception.class} requeueable=#{requeueable}"
-            STDERR.puts "[CI-QUEUE DEBUG] finish: Exception message: #{@exception.message.to_s[0..200]}"
             STDERR.flush
           else
             reporter.report_success!
@@ -239,8 +236,9 @@ module RSpec
             STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' requeue returned: #{requeue_result.inspect}"
             STDERR.flush
             if requeue_result
-              STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUED SUCCESSFULLY - returning true"
+              STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUED SUCCESSFULLY - setting @ci_queue_requeued=true, returning true"
               STDERR.flush
+              @ci_queue_requeued = true  # Track that this test was requeued
               reporter.cancel_run!
               dup.mark_as_requeued!(reporter)
               return true
@@ -264,8 +262,15 @@ module RSpec
             return
           end
         else
-          # This branch is taken when acknowledge=false (from mark_as_requeued! on a DUP)
-          # or when reporter doesn't respond to :requeue
+          # This branch is taken when acknowledge=false (e.g., from Datadog's retry wrapper)
+          # If this test was already requeued by ci-queue, return true to avoid counting as failure
+          if @ci_queue_requeued
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' ELSE BRANCH - already requeued, returning true (not counting as failure)"
+            STDERR.flush
+            return true
+          end
+
+          # Otherwise, call super normally (e.g., for mark_as_requeued! DUP display)
           STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' ELSE BRANCH (acknowledge=#{acknowledge}) - calling super(reporter)"
           STDERR.flush
           result = super(reporter)
@@ -277,6 +282,7 @@ module RSpec
 
       def reset!
         @exception = nil
+        @ci_queue_requeued = nil  # Reset requeue tracking
         @metadata[:execution_result] = RSpec::Core::Example::ExecutionResult.new
       end
     end
