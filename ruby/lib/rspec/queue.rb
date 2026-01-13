@@ -180,6 +180,9 @@ module RSpec
       protected
 
       def mark_as_requeued!(reporter)
+        STDERR.puts "[CI-QUEUE DEBUG] mark_as_requeued!: Called for '#{id}' (this is a DUP for display purposes)"
+        STDERR.flush
+
         @metadata = @metadata.dup # Avoid mutating the @metadata hash of the original Example instance
         @metadata[:execution_result] = execution_result.dup
 
@@ -202,6 +205,8 @@ module RSpec
 
         # Ensure the example is recorded as ran, so it's visible to formatters
         reporter.example_started(self)
+        STDERR.puts "[CI-QUEUE DEBUG] mark_as_requeued!: Calling finish(acknowledge: false) on DUP"
+        STDERR.flush
         finish(reporter, acknowledge: false)
       end
 
@@ -257,7 +262,14 @@ module RSpec
             return
           end
         else
-          super(reporter)
+          # This branch is taken when acknowledge=false (from mark_as_requeued! on a DUP)
+          # or when reporter doesn't respond to :requeue
+          STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' ELSE BRANCH (acknowledge=#{acknowledge}) - calling super(reporter)"
+          STDERR.flush
+          result = super(reporter)
+          STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' ELSE BRANCH super returned: #{result.inspect}"
+          STDERR.flush
+          result
         end
       end
 
@@ -286,10 +298,15 @@ module RSpec
       end
 
       def run(reporter)
+        STDERR.puts "[CI-QUEUE DEBUG] SingleExample#run: START for '#{id}'"
+        STDERR.flush
         instance = example_group.new(example.inspect_output)
         example_group.set_ivars(instance, example_group.before_context_ivars)
         result = example.run(instance, reporter)
-        result.nil? ? true : result
+        final_result = result.nil? ? true : result
+        STDERR.puts "[CI-QUEUE DEBUG] SingleExample#run: END for '#{id}' - example.run returned #{result.inspect}, final_result=#{final_result}"
+        STDERR.flush
+        final_result
       end
     end
 
