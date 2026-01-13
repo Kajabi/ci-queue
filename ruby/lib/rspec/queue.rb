@@ -216,19 +216,24 @@ module RSpec
         if acknowledge && reporter.respond_to?(:requeue)
           if @exception
             reporter.report_failure!
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' has exception: #{@exception.class} - #{@exception.message.to_s[0..100]}"
           else
             reporter.report_success!
           end
 
           if @exception && CI::Queue.requeueable?(@exception) && reporter.requeue
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' REQUEUED - returning true"
             reporter.cancel_run!
             dup.mark_as_requeued!(reporter)
             return true
           elsif reporter.acknowledge || !@exception
             # If the test was already acknowledged by another worker (we timed out)
             # Then we only record it if it is successful.
-            super(reporter)
+            result = super(reporter)
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' acknowledged - super returned: #{result.inspect}"
+            result
           else
+            STDERR.puts "[CI-QUEUE DEBUG] finish: Example '#{id}' NOT acknowledged (timed out?) - canceling run"
             reporter.cancel_run!
             return
           end
@@ -393,6 +398,7 @@ module RSpec
         queue.populate(examples, random: ordering_seed, &:id)
         examples_count = examples.size # TODO: figure out which stub value would be best
         success = true
+        failed_examples = []
         @configuration.reporter.report(examples_count) do |reporter|
           @configuration.add_formatter(BuildStatusRecorder)
           FileUtils.mkdir_p('log')
@@ -401,11 +407,26 @@ module RSpec
           @configuration.with_suite_hooks do
             break if @world.wants_to_quit
             queue.poll do |example|
-              success &= example.run(QueueReporter.new(reporter, queue, example))
+              result = example.run(QueueReporter.new(reporter, queue, example))
+              STDERR.puts "[CI-QUEUE DEBUG] Example '#{example.id}' run returned: #{result.inspect}"
+              unless result
+                failed_examples << example.id
+                STDERR.puts "[CI-QUEUE DEBUG] Example '#{example.id}' FAILED - success is now false"
+              end
+              success &= result
               break if @world.wants_to_quit
             end
           end
         end
+
+        STDERR.puts "[CI-QUEUE DEBUG] === Run Summary ==="
+        STDERR.puts "[CI-QUEUE DEBUG] Total examples run by this worker: #{examples_count}"
+        STDERR.puts "[CI-QUEUE DEBUG] success variable: #{success}"
+        STDERR.puts "[CI-QUEUE DEBUG] @world.non_example_failure: #{@world.non_example_failure}"
+        STDERR.puts "[CI-QUEUE DEBUG] @configuration.failure_exit_code: #{@configuration.failure_exit_code}"
+        STDERR.puts "[CI-QUEUE DEBUG] Failed examples (#{failed_examples.size}): #{failed_examples.join(', ')}" if failed_examples.any?
+        final_exit_code = @world.non_example_failure ? 0 : (success ? 0 : @configuration.failure_exit_code)
+        STDERR.puts "[CI-QUEUE DEBUG] Final exit code: #{final_exit_code}"
 
         return 0 if @world.non_example_failure
         success ? 0 : @configuration.failure_exit_code
