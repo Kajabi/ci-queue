@@ -183,6 +183,11 @@ module RSpec
         STDERR.puts "[CI-QUEUE DEBUG] mark_as_requeued!: Called for '#{id}' (this is a DUP for display purposes)"
         STDERR.flush
 
+        # Clear the requeued flag since this is a DUP for display purposes.
+        # The DUP inherits instance variables from the original, but we need
+        # this DUP to go through the normal finish flow to get proper metadata.
+        @ci_queue_requeued = nil
+
         @metadata = @metadata.dup # Avoid mutating the @metadata hash of the original Example instance
         @metadata[:execution_result] = execution_result.dup
 
