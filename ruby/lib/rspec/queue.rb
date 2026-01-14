@@ -180,6 +180,11 @@ module RSpec
       protected
 
       def mark_as_requeued!(reporter)
+        # Clear the requeued flag since this is a DUP for display purposes.
+        # The DUP inherits instance variables from the original, but we need
+        # this DUP to go through the normal finish flow to get proper metadata.
+        @ci_queue_requeued = nil
+
         @metadata = @metadata.dup # Avoid mutating the @metadata hash of the original Example instance
         @metadata[:execution_result] = execution_result.dup
 
@@ -221,6 +226,7 @@ module RSpec
           end
 
           if @exception && CI::Queue.requeueable?(@exception) && reporter.requeue
+            @ci_queue_requeued = true  # Track that this test was requeued
             reporter.cancel_run!
             dup.mark_as_requeued!(reporter)
             return true
@@ -233,12 +239,19 @@ module RSpec
             return
           end
         else
+          # This branch is taken when acknowledge=false (e.g., from Datadog's retry wrapper)
+          # If this test was already requeued by ci-queue, return true to avoid counting as failure
+          if @ci_queue_requeued
+            return true
+          end
+
           super(reporter)
         end
       end
 
       def reset!
         @exception = nil
+        @ci_queue_requeued = nil  # Reset requeue tracking
         @metadata[:execution_result] = RSpec::Core::Example::ExecutionResult.new
       end
     end
