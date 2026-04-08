@@ -384,6 +384,9 @@ module RSpec
       end
 
       def run_specs(example_groups)
+        worker_id = RSpec::Queue.config.worker_id
+        debug_log = ->(msg) { $stderr.puts "[ci-queue W:#{worker_id} PID:#{Process.pid}] #{msg}"; $stderr.flush }
+
         examples = example_groups.flat_map(&:descendants).flat_map do |example_group|
           example_group.filtered_examples.map do |example|
             SingleExample.new(example_group, example)
@@ -406,22 +409,30 @@ module RSpec
         queue.populate(examples, random: ordering_seed, &:id)
         examples_count = examples.size # TODO: figure out which stub value would be best
         success = true
+        debug_log.call("entering reporter.report block")
         @configuration.reporter.report(examples_count) do |reporter|
           @configuration.add_formatter(BuildStatusRecorder)
           FileUtils.mkdir_p('log')
           @configuration.add_formatter(OrderRecorder, open('log/test_order.log', 'w+'))
 
+          debug_log.call("entering with_suite_hooks")
           @configuration.with_suite_hooks do
             break if @world.wants_to_quit
+            debug_log.call("entering queue.poll")
             queue.poll do |example|
               success &= example.run(QueueReporter.new(reporter, queue, example))
               break if @world.wants_to_quit
             end
+            debug_log.call("queue.poll finished")
           end
+          debug_log.call("with_suite_hooks finished")
         end
+        debug_log.call("reporter.report finished")
 
         return 0 if @world.non_example_failure
-        success ? 0 : @configuration.failure_exit_code
+        exit_code = success ? 0 : @configuration.failure_exit_code
+        debug_log.call("run_specs returning #{exit_code}")
+        exit_code
       end
 
       private

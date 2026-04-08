@@ -47,6 +47,7 @@ module CI
         end
 
         def poll
+          debug_log = ->(msg) { $stderr.puts "[ci-queue-poll W:#{config.worker_id} PID:#{Process.pid}] #{msg}"; $stderr.flush }
           wait_for_master
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if test = reserve
@@ -55,11 +56,14 @@ module CI
               sleep 0.05
             end
           end
+          debug_log.call("poll loop exited: shutdown=#{shutdown_required?} exhausted=#{exhausted?} max_failed=#{max_test_failed?}")
           redis.pipelined do |pipeline|
             pipeline.expire(key('worker', worker_id, 'queue'), config.redis_ttl)
             pipeline.expire(key('processed'), config.redis_ttl)
           end
-        rescue *CONNECTION_ERRORS
+          debug_log.call("poll redis cleanup done")
+        rescue *CONNECTION_ERRORS => e
+          debug_log.call("poll rescued connection error: #{e.class}: #{e.message}")
         end
 
         if ::Redis.method_defined?(:exists?)
