@@ -420,7 +420,10 @@ module RSpec
             break if @world.wants_to_quit
             debug_log.call("entering queue.poll")
             queue.poll do |example|
-              success &= example.run(QueueReporter.new(reporter, queue, example))
+              debug_log.call("running: #{example.id}")
+              result = example.run(QueueReporter.new(reporter, queue, example))
+              debug_log.call("completed: #{example.id} result=#{result}")
+              success &= result
               break if @world.wants_to_quit
             end
             debug_log.call("queue.poll finished")

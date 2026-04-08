@@ -51,7 +51,9 @@ module CI
           wait_for_master
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if test = reserve
+              debug_log.call("reserved: #{test}")
               yield index.fetch(test)
+              debug_log.call("yielded: #{test}")
             else
               sleep 0.05
             end
