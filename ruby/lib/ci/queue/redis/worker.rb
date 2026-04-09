@@ -49,12 +49,18 @@ module CI
         def poll
           debug_log = ->(msg) { $stderr.puts "[ci-queue-poll W:#{config.worker_id} PID:#{Process.pid}] #{msg}"; $stderr.flush }
           wait_for_master
+          idle_count = 0
           until shutdown_required? || config.circuit_breakers.any?(&:open?) || exhausted? || max_test_failed?
             if test = reserve
+              idle_count = 0
               debug_log.call("reserved: #{test}")
               yield index.fetch(test)
               debug_log.call("yielded: #{test}")
             else
+              idle_count += 1
+              if idle_count == 1 || idle_count % 100 == 0
+                debug_log.call("idle loop ##{idle_count}: exhausted?=#{exhausted?} size=#{size} queue_init=#{queue_initialized?} shutdown=#{shutdown_required?}")
+              end
               sleep 0.05
             end
           end
