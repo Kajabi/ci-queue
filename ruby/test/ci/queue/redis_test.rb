@@ -270,7 +270,46 @@ class CI::Queue::RedisTest < Minitest::Test
     assert_instance_of CI::Queue::Redis::Worker, queue
   end
 
+  # PE-3857: every key ci-queue writes must carry a TTL at write time.
+  #
+  # These keys used to get their EXPIRE at the tail of Worker#poll, which never
+  # runs for a worker that is killed, cancelled, OOMs or loses its Redis
+  # connection -- so the key leaked forever. On tools-redis-001 that grew to
+  # 464k permanent keys / 9.5 GiB, which then forced the node to evict the live
+  # queue keys of in-flight builds under its volatile-lru policy.
+  #
+  # Deliberately drives reserve/requeue/acknowledge by hand rather than through
+  # #poll, so that the end-of-poll EXPIRE never runs -- that is the leak.
+  def test_every_build_key_has_a_ttl
+    ttl = 600
+    # setup already populated a queue under the same build id with the default
+    # 8h TTL; start clean so this test only measures its own writes.
+    @redis.flushdb
+    queue = worker(1, max_requeues: 1, requeue_tolerance: 1.0, redis_ttl: ttl)
+
+    first = test_for(queue.send(:reserve))
+    queue.requeue(first)
+    second = test_for(queue.send(:reserve))
+    queue.acknowledge(second)
+
+    queue.build.record_warning(:some_warning, test: 'x', timeout: 1)
+    queue.increment_test_failed
+    queue.created_at = CI::Queue.time_now.to_f
+    queue.release!
+
+    keys = @redis.keys('build:*')
+    refute_empty keys
+
+    without_ttl = keys.reject { |key| @redis.ttl(key) > 0 }.sort
+    assert_equal [], without_ttl, "keys written without a TTL: #{without_ttl.join(', ')}"
+    assert keys.all? { |key| @redis.ttl(key) <= ttl }
+  end
+
   private
+
+  def test_for(id)
+    TEST_LIST.find { |test| test.id == id } or raise "unknown test id #{id.inspect}"
+  end
 
   def shuffled_test_list
     CI::Queue.shuffle(TEST_LIST, Random.new(0)).freeze

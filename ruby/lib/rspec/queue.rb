@@ -299,14 +299,33 @@ module RSpec
 
         step("Waiting for workers to complete")
 
-        unless supervisor.wait_for_workers
-          unless supervisor.queue_initialized?
-            abort! "No master was elected. Did all workers crash?"
+        begin
+          unless supervisor.wait_for_workers
+            unless supervisor.queue_initialized?
+              abort! "No master was elected. Did all workers crash?"
+            end
+
+            unless supervisor.exhausted?
+              abort! "#{supervisor.size} tests weren't run."
+            end
           end
 
-          unless supervisor.exhausted?
-            abort! "#{supervisor.size} tests weren't run."
+          # PE-3857: an evicted queue is indistinguishable from a completed one --
+          # the queue reads as exhausted and the error-report hash reads as empty,
+          # so we would report success for a run whose results we no longer have.
+          # Refuse to certify a build whose bookkeeping is gone.
+          total = supervisor.total
+          progress = supervisor.build.progress
+
+          if total.zero?
+            abort! queue_vanished_message("`total` is 0 -- the queue is empty or was never populated")
           end
+
+          if progress <= 0
+            abort! queue_vanished_message("no test progress was recorded (total=#{total}, progress=#{progress})")
+          end
+        rescue CI::Queue::Redis::LostMaster
+          abort! queue_vanished_message("the master worker record is gone")
         end
 
         # TODO: better reporting
@@ -323,6 +342,13 @@ module RSpec
       end
 
       private
+
+      def queue_vanished_message(detail)
+        "Refusing to report a result: #{detail}.\n" \
+          "The queue's Redis keys are missing, so this run cannot be certified as passing. " \
+          "This is not a test failure -- it usually means the keys were evicted (check the " \
+          "ci-queue Redis memory usage) or the build ran longer than CI_QUEUE_REDIS_TTL."
+      end
 
       attr_reader :configuration
 

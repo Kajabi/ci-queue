@@ -5,6 +5,7 @@ local owners_key = KEYS[4]
 
 local current_time = ARGV[1]
 local timeout = ARGV[2]
+local ttl = ARGV[3]
 
 local lost_tests = redis.call('zrangebyscore', zset_key, 0, current_time - timeout)
 for _, test in ipairs(lost_tests) do
@@ -12,6 +13,11 @@ for _, test in ipairs(lost_tests) do
     redis.call('zadd', zset_key, current_time, test)
     redis.call('lpush', worker_queue_key, test)
     redis.call('hset', owners_key, test, worker_queue_key) -- Take ownership
+
+    redis.call('expire', zset_key, ttl)
+    redis.call('expire', worker_queue_key, ttl)
+    redis.call('expire', owners_key, ttl)
+
     return test
   end
 end
