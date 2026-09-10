@@ -118,7 +118,10 @@ module CI
         end
 
         def created_at=(timestamp)
-          redis.setnx(key('created-at'), timestamp)
+          redis.pipelined do |pipeline|
+            pipeline.setnx(key('created-at'), timestamp)
+            pipeline.expire(key('created-at'), config.redis_ttl)
+          end
         end
 
         def size
@@ -182,7 +185,10 @@ module CI
         end
 
         def increment_test_failed
-          redis.incr(key('test_failed_count'))
+          redis.pipelined do |pipeline|
+            pipeline.incr(key('test_failed_count'))
+            pipeline.expire(key('test_failed_count'), config.redis_ttl)
+          end
         end
 
         def test_failed
@@ -241,7 +247,8 @@ module CI
         end
 
         class HeartbeatProcess
-          def initialize(redis_url, zset_key, processed_key, owners_key, worker_queue_key)
+          def initialize(redis_url, zset_key, processed_key, owners_key, worker_queue_key, redis_ttl)
+            @redis_ttl = redis_ttl
             @redis_url = redis_url
             @zset_key = zset_key
             @processed_key = processed_key
@@ -261,6 +268,7 @@ module CI
               @processed_key,
               @owners_key,
               @worker_queue_key,
+              @redis_ttl.to_s,
               in: child_read,
               out: child_write,
             )
@@ -335,6 +343,7 @@ module CI
             key('processed'),
             key('owners'),
             key('worker', worker_id, 'queue'),
+            config.redis_ttl,
           )
         end
 

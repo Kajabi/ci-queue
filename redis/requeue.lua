@@ -9,6 +9,7 @@ local max_requeues = tonumber(ARGV[1])
 local global_max_requeues = tonumber(ARGV[2])
 local test = ARGV[3]
 local offset = ARGV[4]
+local ttl = ARGV[5]
 
 if redis.call('hget', owners_key, test) == worker_queue_key then
    redis.call('hdel', owners_key, test)
@@ -30,6 +31,7 @@ end
 
 redis.call('hincrby', requeues_count_key, '___total___', 1)
 redis.call('hincrby', requeues_count_key, test, 1)
+redis.call('expire', requeues_count_key, ttl)
 
 local pivot = redis.call('lrange', queue_key, -1 - offset, 0 - offset)[1]
 if pivot then
@@ -38,6 +40,7 @@ else
   redis.call('lpush', queue_key, test)
 end
 
+redis.call('expire', queue_key, ttl)
 redis.call('zrem', zset_key, test)
 
 return true

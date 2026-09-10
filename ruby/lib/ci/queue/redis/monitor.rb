@@ -13,7 +13,8 @@ module CI
         DEV_SCRIPTS_ROOT = ::File.expand_path('../../../../../../redis', __FILE__)
         RELEASE_SCRIPTS_ROOT = ::File.expand_path('../../redis', __FILE__)
 
-        def initialize(pipe, logger, redis_url, zset_key, processed_key, owners_key, worker_queue_key)
+        def initialize(pipe, logger, redis_url, zset_key, processed_key, owners_key, worker_queue_key, redis_ttl)
+          @redis_ttl = redis_ttl
           @zset_key = zset_key
           @processed_key = processed_key
           @owners_key = owners_key
@@ -40,7 +41,7 @@ module CI
           eval_script(
             :heartbeat,
             keys: [@zset_key, @processed_key, @owners_key, @worker_queue_key],
-            argv: [Time.now.to_f, id]
+            argv: [Time.now.to_f, id, @redis_ttl]
           )
         rescue => error
           @logger.info(error)
@@ -142,9 +143,10 @@ zset_key = ARGV[1]
 processed_key = ARGV[2]
 owners_key = ARGV[3]
 worker_queue_key = ARGV[4]
+redis_ttl = ARGV[5]
 
 logger.debug("Starting monitor: #{redis_url} #{zset_key} #{processed_key}")
-manager = CI::Queue::Redis::Monitor.new($stdin, logger, redis_url, zset_key, processed_key, owners_key, worker_queue_key)
+manager = CI::Queue::Redis::Monitor.new($stdin, logger, redis_url, zset_key, processed_key, owners_key, worker_queue_key, redis_ttl)
 
 # Notify the parent we're ready
 $stdout.puts(".")

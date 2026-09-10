@@ -53,7 +53,10 @@ module CI
         end
 
         def record_warning(type, attributes)
-          redis.rpush(key('warnings'), Marshal.dump([type, attributes]))
+          redis.pipelined do |pipeline|
+            pipeline.rpush(key('warnings'), Marshal.dump([type, attributes]))
+            pipeline.expire(key('warnings'), config.redis_ttl)
+          end
         end
 
         def record_error(id, payload, stats: nil)
