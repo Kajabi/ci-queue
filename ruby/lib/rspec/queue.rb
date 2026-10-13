@@ -5,6 +5,7 @@ require 'rspec/core'
 require 'ci/queue'
 require 'rspec/queue/build_status_recorder'
 require 'rspec/queue/order_recorder'
+require 'rspec/queue/watchdog'
 
 module RSpec
   module Queue
@@ -155,6 +156,16 @@ module RSpec
         parser.separator ""
         parser.on('--max-consecutive-failures MAX', *help) do |max|
           queue_config.max_consecutive_failures = Integer(max)
+        end
+
+        help = <<~EOS
+          Abort this worker with a stack dump if no example starts or finishes for SECONDS.
+          Set it below your CI provider's no-output timeout so the dump lands in the job log.
+          Disabled by default.
+        EOS
+        parser.separator ""
+        parser.on('--watchdog SECONDS', *help) do |seconds|
+          queue_config.watchdog_timeout = Float(seconds)
         end
 
         help = <<~EOS
@@ -417,6 +428,8 @@ module RSpec
         end
 
         queue = CI::Queue.from_uri(queue_url, RSpec::Queue.config)
+        watchdog = Watchdog.build(RSpec::Queue.config)
+        watchdog.phase!('connecting to the queue')
 
         if queue.retrying?
           retry_queue = queue.retry_queue
@@ -429,22 +442,31 @@ module RSpec
         end
 
         BuildStatusRecorder.build = queue.build
+        watchdog.phase!('populating the queue')
         queue.populate(examples, random: ordering_seed, &:id)
         examples_count = examples.size # TODO: figure out which stub value would be best
         success = true
+        watchdog.phase!('starting the reporter')
         @configuration.reporter.report(examples_count) do |reporter|
           @configuration.add_formatter(BuildStatusRecorder)
           FileUtils.mkdir_p('log')
           @configuration.add_formatter(OrderRecorder, open('log/test_order.log', 'w+'))
 
+          watchdog.phase!('before(:suite) hooks')
           @configuration.with_suite_hooks do
             break if @world.wants_to_quit
+            watchdog.phase!('waiting for the first example')
             queue.poll do |example|
+              watchdog.phase!("running #{example.id}")
               success &= example.run(QueueReporter.new(reporter, queue, example))
+              watchdog.phase!("reserving the next example after #{example.id}")
               break if @world.wants_to_quit
             end
+            watchdog.phase!('after(:suite) hooks')
           end
+          watchdog.phase!('finishing the reporter')
         end
+        watchdog.phase!('exiting (at_exit hooks)')
 
         return 0 if @world.non_example_failure
         success ? 0 : @configuration.failure_exit_code

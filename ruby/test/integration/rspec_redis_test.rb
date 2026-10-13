@@ -298,6 +298,52 @@ module Integration
       assert_equal 0, $?.exitstatus
     end
 
+    def test_watchdog_aborts_a_stuck_worker
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      _out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--watchdog', '1',
+          chdir: 'test/fixtures/watchdog',
+        )
+      end
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      assert_equal 43, $?.exitstatus
+      assert_includes err, '[ci-queue watchdog] no activity for'
+      assert_includes err, 'running ./spec/stuck_spec.rb[1:1]'
+      assert_match(/stuck_spec\.rb:\d+/, err)
+      assert_operator elapsed, :<, 20
+    end
+
+    def test_watchdog_survives_into_at_exit
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      _out, err = capture_subprocess_io do
+        system(
+          { 'BUILDKITE' => '1', 'BUILDKITE_COMMIT' => 'aaaaaaaaaaaaa' },
+          @exe,
+          '--queue', @redis_url,
+          '--seed', '123',
+          '--build', '1',
+          '--worker', '1',
+          '--timeout', '1',
+          '--watchdog', '1',
+          chdir: 'test/fixtures/watchdog_at_exit',
+        )
+      end
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      assert_equal 43, $?.exitstatus
+      assert_includes err, 'exiting (at_exit hooks)'
+      assert_operator elapsed, :<, 20
+    end
+
     def test_report
       out, err = capture_subprocess_io do
         system(

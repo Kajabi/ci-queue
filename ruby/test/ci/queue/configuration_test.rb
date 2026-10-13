@@ -143,5 +143,11 @@ module CI::Queue
       assert_equal 45, config.report_timeout
     end
 
+    def test_watchdog_timeout_disabled_by_default
+      config = Configuration.new
+
+      assert_nil config.watchdog_timeout
+    end
+
   end
 end

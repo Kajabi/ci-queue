@@ -67,6 +67,8 @@ If you'd like to centralize the error reporting you can do so with:
 rspec-queue --queue redis://example.com --timeout 600 --report
 ```
 
+To diagnose workers that hang silently, pass `--watchdog SECONDS`. If no example starts or finishes for that long, the worker writes the current phase, every thread's backtrace and its process tree to stderr, then exits with code 43. Set it below your CI provider's no-output timeout so the dump reaches the job log.
+
 #### Limitations
 
 Because of how `ci-queue` executes the examples, `before(:all)` and `after(:all)` hooks are not supported. `rspec-queue` will explicitly reject them.
